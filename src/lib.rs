@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod entity;
 pub mod object;
+pub mod protocol;
 pub mod runtime;
 pub mod snapshot;
 pub mod time;
