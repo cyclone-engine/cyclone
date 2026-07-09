@@ -6,6 +6,10 @@ struct Counter {
 }
 
 impl Object for Counter {
+    fn type_id(&self) -> u32 {
+        1
+    }
+
     fn on_tick(&mut self, info: &TickInfo, _cmd: &mut Commands) {
         self.value += self.step;
         println!(

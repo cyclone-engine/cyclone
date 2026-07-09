@@ -12,6 +12,10 @@ struct Recorder {
 }
 
 impl Object for Recorder {
+    fn type_id(&self) -> u32 {
+        1
+    }
+
     fn on_tick(&mut self, _info: &TickInfo, _cmd: &mut Commands) {
         self.value += self.step;
         self.log.borrow_mut().push(self.value);

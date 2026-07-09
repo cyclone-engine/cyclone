@@ -1,6 +1,7 @@
 use crate::commands::{Commands, PendingCommand};
 use crate::entity::{Entity, EntityId};
 use crate::object::{Object, TickInfo};
+use crate::snapshot::{Snapshot, SnapshotItem, SnapshotWriter};
 use crate::time::TickId;
 
 /// Entity + Object của cùng một slot luôn đi cùng nhau — tránh trường hợp
@@ -65,6 +66,32 @@ impl World {
             self.entries[i].object.on_tick(&info, &mut cmd);
         }
         self.flush(tick);
+    }
+
+    /// Tổng hợp state hiện tại thành 1 Snapshot: mỗi entity còn sống tự
+    /// nguyện phơi field của mình qua write_snapshot(), World chỉ đứng ra
+    /// gọi lần lượt — đây là 1 read-pass thuần (&self khắp nơi), không
+    /// đụng Commands, không có vấn đề mượn nào cả.
+    pub fn snapshot(&self, tick: TickId) -> Snapshot {
+        let mut snapshot = Snapshot::new(tick);
+        for entry in &self.entries {
+            if !entry.entity.alive {
+                continue;
+            }
+            let mut writer = SnapshotWriter::new();
+            entry.object.write_snapshot(&mut writer);
+            if writer.is_empty() {
+                // Không ghi gì -> không replicate (ví dụ AIController, Timer).
+                continue;
+            }
+            snapshot.push(SnapshotItem {
+                id: entry.entity.id,
+                type_id: entry.object.type_id(),
+                fields: writer.finish(),
+            });
+        }
+        snapshot.sort();
+        snapshot
     }
 
     /// Xử lý đúng 1 pass các lệnh đang có tại thời điểm gọi. Lệnh mới phát

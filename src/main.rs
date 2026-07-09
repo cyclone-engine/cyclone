@@ -6,6 +6,10 @@ struct Player {
 }
 
 impl Object for Player {
+    fn type_id(&self) -> u32 {
+        1
+    }
+
     fn on_tick(&mut self, info: &TickInfo, _cmd: &mut Commands) {
         self.position += self.velocity;
         println!(

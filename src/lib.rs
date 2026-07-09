@@ -2,6 +2,7 @@ pub mod commands;
 pub mod entity;
 pub mod object;
 pub mod runtime;
+pub mod snapshot;
 pub mod time;
 pub mod world;
 
