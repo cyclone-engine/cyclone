@@ -26,6 +26,12 @@ impl From<EntityId> for NetEntityId {
     }
 }
 
+impl From<NetEntityId> for EntityId {
+    fn from(id: NetEntityId) -> Self {
+        EntityId::new(id.index, id.generation)
+    }
+}
+
 impl WireEncode for NetEntityId {
     fn encode(&self, buf: &mut Vec<u8>) {
         write_u32(buf, self.index);
@@ -51,6 +57,16 @@ pub struct WireSnapshotItem {
 
 impl From<&SnapshotItem> for WireSnapshotItem {
     fn from(item: &SnapshotItem) -> Self {
+        Self {
+            id: item.id.into(),
+            type_id: item.type_id,
+            fields: item.fields.clone(),
+        }
+    }
+}
+
+impl From<&WireSnapshotItem> for SnapshotItem {
+    fn from(item: &WireSnapshotItem) -> Self {
         Self {
             id: item.id.into(),
             type_id: item.type_id,
@@ -113,6 +129,21 @@ impl From<&Snapshot> for WireSnapshot {
     }
 }
 
+impl From<&WireSnapshot> for Snapshot {
+    fn from(wire: &WireSnapshot) -> Self {
+        let mut snapshot = Snapshot::new(crate::time::TickId(wire.tick));
+        for item in &wire.items {
+            snapshot.push(item.into());
+        }
+        // Nguồn dữ liệu (WireSnapshot đã decode) không đảm bảo sort — có
+        // thể đến từ SDK khác chưa giữ đúng bất biến này. Sort lại ở đây
+        // để mọi Snapshot nội bộ, bất kể tạo ra từ đâu, luôn thoả bất biến
+        // "sorted theo EntityId" mà diff()/apply() yêu cầu.
+        snapshot.sort();
+        snapshot
+    }
+}
+
 impl WireEncode for WireSnapshot {
     fn encode(&self, buf: &mut Vec<u8>) {
         write_u64(buf, self.tick);
@@ -143,5 +174,28 @@ impl WireDecode for WireSnapshot {
             items.push(WireSnapshotItem::decode(buf)?);
         }
         Ok(Self { tick, items })
+    }
+}
+
+impl WireSnapshot {
+    /// Tiện ích cho SDK/caller không muốn tự quản lý Vec<u8> buffer —
+    /// encode()/decode() gốc vẫn là API chính (cursor-based, ghép được
+    /// nhiều wire type liên tiếp trong 1 buffer, ví dụ Packet payload).
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        self.encode(&mut buf);
+        buf
+    }
+
+    /// Khác với `decode()`: đòi hỏi dùng hết toàn bộ `bytes`, không cho
+    /// trailing byte — vì đây là "1 buffer = 1 giá trị", không phải cursor
+    /// giữa nhiều trường trong 1 struct lớn hơn.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        let mut cursor = bytes;
+        let value = Self::decode(&mut cursor)?;
+        if !cursor.is_empty() {
+            return Err(ProtocolError::TrailingBytes);
+        }
+        Ok(value)
     }
 }

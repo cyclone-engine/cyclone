@@ -9,6 +9,19 @@ pub enum DeltaItem {
     Remove { id: EntityId },
 }
 
+impl DeltaItem {
+    /// EntityId mà item này nói tới, bất kể biến thể — dùng bởi `apply()`
+    /// để merge tuyến tính `old.items` với `delta.items` mà không cần
+    /// match lặp lại 3 nhánh ở mỗi điểm gọi.
+    pub fn id(&self) -> EntityId {
+        match self {
+            DeltaItem::Spawn { item } => item.id,
+            DeltaItem::Update { id, .. } => *id,
+            DeltaItem::Remove { id } => *id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SnapshotDelta {
     pub items: Vec<DeltaItem>,

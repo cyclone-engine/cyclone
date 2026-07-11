@@ -12,6 +12,12 @@ pub const MAGIC: [u8; 2] = *b"CY";
 /// >1MB/tick; số lớn hơn gần như chắc chắn là input sai hoặc cố tình.
 pub const MAX_PACKET_SIZE: usize = 1 << 20;
 
+/// Số byte cố định của header: magic(2) + version(2) + kind(1) +
+/// payload_len(4). Public để `net::PacketReader` biết cần tối thiểu bao
+/// nhiêu byte trước khi gọi được `peek_payload_len` — cùng một nguồn sự
+/// thật với `decode()`, không hard-code lại offset ở module khác.
+pub const HEADER_LEN: usize = 9;
+
 /// Loại payload bên trong packet. Chỉ 2 giá trị cho v0.2.5; thêm loại mới
 /// phải append cuối, không đổi số đã gán (đó là hợp đồng đã gửi ra ngoài).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,5 +112,31 @@ impl Packet {
             kind,
             payload: payload.to_vec(),
         })
+    }
+
+    /// Đọc payload_len từ header đã nhận đủ HEADER_LEN byte, không đụng gì
+    /// tới payload. Dùng bởi `net::PacketReader` để biết cần đợi thêm bao
+    /// nhiêu byte từ socket trước khi có đủ dữ liệu gọi `decode()` trên 1
+    /// packet trọn vẹn — không validate version ở đây, `decode()` đầy đủ
+    /// sẽ làm việc đó khi packet đã ghép xong.
+    pub fn peek_payload_len(header: &[u8]) -> Result<usize, ProtocolError> {
+        debug_assert!(header.len() >= HEADER_LEN);
+        let cursor = &mut &header[..HEADER_LEN];
+
+        let magic: [u8; 2] = [read_u8(cursor)?, read_u8(cursor)?];
+        if magic != MAGIC {
+            return Err(ProtocolError::InvalidMagic);
+        }
+        let _version = read_u16(cursor)?;
+        let _kind = read_u8(cursor)?;
+        let payload_len = read_u32(cursor)? as usize;
+
+        if payload_len > MAX_PACKET_SIZE {
+            return Err(ProtocolError::PayloadTooLarge {
+                len: payload_len,
+                max: MAX_PACKET_SIZE,
+            });
+        }
+        Ok(payload_len)
     }
 }

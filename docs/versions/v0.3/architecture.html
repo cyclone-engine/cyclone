@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8" />
+    <title>Cyclone — Kiến trúc &amp; luồng thực thi</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        :root {
+            --bg: #f6f7f6;
+            --surface: #ffffff;
+            --surface-2: #eef1ef;
+            --ink: #12181a;
+            --ink-dim: #4c5a5c;
+            --line: #d6dcda;
+            --accent: #0d7d75;
+            --accent-ink: #ffffff;
+            --amber: #a35c00;
+            --amber-bg: #fbeed9;
+            --pure: #0d7d75;
+            --pure-bg: #e2f2ef;
+            --io: #a35c00;
+            --io-bg: #fbeed9;
+            --code-bg: #101718;
+            --code-ink: #d9e6e2;
+            --code-dim: #7fa89e;
+            --shadow: 0 1px 2px rgba(16,23,24,0.06), 0 8px 24px -12px rgba(16,23,24,0.18);
+        }
+        :root[data-theme="dark"] {
+            --bg: #0c1213;
+            --surface: #121a1b;
+            --surface-2: #17201f;
+            --ink: #e9f1ee;
+            --ink-dim: #9db2ac;
+            --line: #24312f;
+            --accent: #5fd9c9;
+            --accent-ink: #062421;
+            --amber: #e8a94f;
+            --amber-bg: #241b0c;
+            --pure: #5fd9c9;
+            --pure-bg: #10221f;
+            --io: #e8a94f;
+            --io-bg: #241b0c;
+            --code-bg: #060a0a;
+            --code-ink: #cfe4dd;
+            --code-dim: #5b8079;
+            --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 12px 32px -14px rgba(0,0,0,0.7);
+        }
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme="light"]) {
+                --bg: #0c1213;
+                --surface: #121a1b;
+                --surface-2: #17201f;
+                --ink: #e9f1ee;
+                --ink-dim: #9db2ac;
+                --line: #24312f;
+                --accent: #5fd9c9;
+                --accent-ink: #062421;
+                --amber: #e8a94f;
+                --amber-bg: #241b0c;
+                --pure: #5fd9c9;
+                --pure-bg: #10221f;
+                --io: #e8a94f;
+                --io-bg: #241b0c;
+                --code-bg: #060a0a;
+                --code-ink: #cfe4dd;
+                --code-dim: #5b8079;
+                --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 12px 32px -14px rgba(0,0,0,0.7);
+            }
+        }
+
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; }
+        body {
+            background: var(--bg);
+            color: var(--ink);
+            font-family: "Segoe UI", ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.55;
+            -webkit-font-smoothing: antialiased;
+        }
+        .wrap {
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 56px 24px 120px;
+        }
+
+        header.hero {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            padding-bottom: 40px;
+            border-bottom: 1px solid var(--line);
+            margin-bottom: 48px;
+        }
+        .eyebrow {
+            font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", Menlo, Consolas, monospace;
+            font-size: 12.5px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .eyebrow .dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: var(--accent);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+        }
+        h1 {
+            font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Noto Serif", serif;
+            font-weight: 600;
+            font-size: clamp(28px, 4.2vw, 40px);
+            line-height: 1.15;
+            margin: 0;
+            text-wrap: balance;
+            letter-spacing: -0.01em;
+        }
+        .sub {
+            color: var(--ink-dim);
+            font-size: 16px;
+            max-width: 68ch;
+            margin: 0;
+        }
+        .meta-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 6px;
+        }
+        .chip {
+            font-family: ui-monospace, monospace;
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            color: var(--ink-dim);
+            background: var(--surface);
+        }
+
+        h2 {
+            font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+            font-size: 22px;
+            font-weight: 600;
+            margin: 0 0 6px;
+            letter-spacing: -0.005em;
+        }
+        h2 .num {
+            font-family: ui-monospace, monospace;
+            color: var(--accent);
+            font-size: 15px;
+            margin-right: 10px;
+            font-weight: 500;
+        }
+        .section {
+            margin-bottom: 56px;
+        }
+        .lede {
+            color: var(--ink-dim);
+            font-size: 15px;
+            max-width: 70ch;
+            margin: 0 0 24px;
+        }
+
+        /* legend */
+        .legend {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+            font-size: 13px;
+            color: var(--ink-dim);
+            margin-bottom: 20px;
+        }
+        .legend span { display: inline-flex; align-items: center; gap: 7px; }
+        .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+        .swatch.pure { background: var(--pure); }
+        .swatch.io { background: var(--io); }
+
+        /* layer stack diagram */
+        .stack {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .layer {
+            display: grid;
+            grid-template-columns: 168px 1fr;
+            gap: 0;
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+        }
+        .layer .tag {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 14px 16px;
+            font-family: ui-monospace, monospace;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--accent-ink);
+            background: var(--pure);
+        }
+        .layer.io .tag { background: var(--io); }
+        .layer .tag .kind {
+            font-size: 9.5px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            opacity: 0.85;
+            font-weight: 700;
+        }
+        .layer .body {
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            justify-content: center;
+        }
+        .layer .body .desc { font-size: 13.5px; color: var(--ink-dim); }
+        .layer .body .files {
+            font-family: ui-monospace, monospace;
+            font-size: 11.5px;
+            color: var(--ink-dim);
+            opacity: 0.75;
+        }
+        .arrow-down {
+            display: flex;
+            justify-content: center;
+            color: var(--line);
+            font-size: 13px;
+            margin: -2px 0;
+        }
+
+        /* flow sequence */
+        .flow {
+            display: flex;
+            flex-direction: column;
+            border-left: 2px solid var(--line);
+            margin-left: 14px;
+            padding-left: 28px;
+        }
+        .step {
+            position: relative;
+            padding-bottom: 26px;
+        }
+        .step:last-child { padding-bottom: 0; }
+        .step::before {
+            content: attr(data-n);
+            position: absolute;
+            left: -41px;
+            top: -2px;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: var(--surface);
+            border: 2px solid var(--accent);
+            color: var(--accent);
+            font-family: ui-monospace, monospace;
+            font-size: 12px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .step h3 {
+            margin: 0 0 4px;
+            font-size: 15px;
+            font-weight: 600;
+            font-family: "Segoe UI", system-ui, sans-serif;
+        }
+        .step p { margin: 0; color: var(--ink-dim); font-size: 14px; max-width: 68ch; }
+        .step code.inline, p code.inline, .desc code.inline, .files code.inline {
+            font-family: ui-monospace, monospace;
+            background: var(--surface-2);
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-size: 0.92em;
+            color: var(--ink);
+        }
+        .step-phase {
+            font-family: ui-monospace, monospace;
+            font-size: 10.5px;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--accent);
+            margin-bottom: 3px;
+            display: block;
+        }
+
+        /* code blocks */
+        pre {
+            background: var(--code-bg);
+            color: var(--code-ink);
+            border-radius: 10px;
+            padding: 16px 18px;
+            overflow-x: auto;
+            font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", Menlo, Consolas, monospace;
+            font-size: 12.5px;
+            line-height: 1.6;
+            margin: 10px 0 0;
+            border: 1px solid var(--line);
+        }
+        pre .c { color: var(--code-dim); }
+
+        /* detail cards */
+        .cards {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 20px 22px;
+            box-shadow: var(--shadow);
+        }
+        .card-head {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .card-head h3 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 700;
+            font-family: ui-monospace, monospace;
+        }
+        .card-head .kindtag {
+            font-family: ui-monospace, monospace;
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            padding: 3px 8px;
+            border-radius: 999px;
+            font-weight: 700;
+        }
+        .kindtag.pure { color: var(--pure); background: var(--pure-bg); }
+        .kindtag.io { color: var(--io); background: var(--io-bg); }
+        .card p.role { margin: 0 0 10px; color: var(--ink-dim); font-size: 14px; }
+        .card .path { font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--ink-dim); opacity: 0.8; margin-bottom: 10px; }
+
+        /* rules list */
+        .rules {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+        .rule {
+            display: flex;
+            gap: 12px;
+            padding: 14px 16px;
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-left: 3px solid var(--accent);
+            border-radius: 8px;
+        }
+        .rule .icon {
+            font-family: ui-monospace, monospace;
+            color: var(--accent);
+            font-weight: 700;
+            flex: none;
+        }
+        .rule p { margin: 0; font-size: 14px; color: var(--ink-dim); }
+        .rule strong { color: var(--ink); }
+
+        footer {
+            margin-top: 60px;
+            padding-top: 24px;
+            border-top: 1px solid var(--line);
+            font-size: 12.5px;
+            color: var(--ink-dim);
+            font-family: ui-monospace, monospace;
+        }
+
+        @media (max-width: 640px) {
+            .layer { grid-template-columns: 1fr; }
+            .layer .tag { border-radius: 0; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="wrap">
+
+    <header class="hero">
+        <div class="eyebrow"><span class="dot"></span>rust · headless multiplayer server framework</div>
+        <h1>Cyclone — cấu trúc các tầng &amp; cách nó chạy</h1>
+        <p class="sub">Cyclone là một deterministic tick-simulation engine viết bằng Rust (1 crate duy nhất, <code class="inline">/root/.cline/index/cyclone</code>), tách bạch simulation, snapshot, giao thức mạng và I/O thật thành 9 module phụ thuộc một chiều. Bên dưới là sơ đồ tầng, luồng thực thi theo đúng lời gọi hàm trong mã nguồn, và chi tiết từng module.</p>
+        <div class="meta-row">
+            <span class="chip">edition 2024</span>
+            <span class="chip">0 runtime deps</span>
+            <span class="chip">9 modules</span>
+            <span class="chip">TCP + fixed-timestep</span>
+        </div>
+    </header>
+
+    <section class="section">
+        <h2><span class="num">01</span>Sơ đồ tầng (dependency chỉ đi một chiều, từ dưới lên)</h2>
+        <p class="lede">Cyclone lặp lại một nguyên tắc xuyên suốt: mỗi cặp tầng tách "logic thuần" (không I/O, dễ test, deterministic) ra khỏi "tầng chạm thế giới thật" (đồng hồ hệ thống, socket TCP). Đọc sơ đồ từ dưới lên — tầng trên phụ thuộc tầng dưới, không bao giờ ngược lại.</p>
+        <div class="legend">
+            <span><span class="swatch pure"></span>Logic thuần — deterministic, không I/O</span>
+            <span><span class="swatch io"></span>Chạm I/O thật — đồng hồ hệ thống / socket</span>
+        </div>
+
+        <div class="stack">
+            <div class="layer io">
+                <div class="tag">net<span class="kind">I/O · socket</span></div>
+                <div class="body">
+                    <div class="desc">TCP thật: <code class="inline">Server</code> accept connection, <code class="inline">Connection</code> gửi/nhận <code class="inline">Packet</code>, <code class="inline">PacketReader</code> ghép byte phân mảnh.</div>
+                    <div class="files">server.rs · connection.rs · reader.rs · error.rs</div>
+                </div>
+            </div>
+            <div class="arrow-down">▲ dùng</div>
+            <div class="layer">
+                <div class="tag">replication<span class="kind">adapter</span></div>
+                <div class="body">
+                    <div class="desc"><code class="inline">SnapshotSender</code> quyết định gửi full snapshot hay delta; <code class="inline">send_outgoing()</code> nối Snapshot → Wire → Packet → Connection.</div>
+                    <div class="files">sender.rs · packet_sender.rs · applier.rs</div>
+                </div>
+            </div>
+            <div class="arrow-down">▲ dùng</div>
+            <div class="layer">
+                <div class="tag">protocol<span class="kind">wire format</span></div>
+                <div class="body">
+                    <div class="desc">Encode/decode nhị phân little-endian: <code class="inline">Packet</code> (magic+version+kind+len), <code class="inline">WireSnapshot</code>, <code class="inline">WireDelta</code>. Không biết World hay socket.</div>
+                    <div class="files">packet.rs · codec.rs · snapshot.rs · delta.rs · version.rs · error.rs</div>
+                </div>
+            </div>
+            <div class="arrow-down">▲ dùng</div>
+            <div class="layer">
+                <div class="tag">snapshot<span class="kind">state</span></div>
+                <div class="body">
+                    <div class="desc">Trạng thái world tại 1 tick, dạng thuần dữ liệu: <code class="inline">Snapshot</code>, <code class="inline">diff()</code>/<code class="inline">apply()</code> merge tuyến tính O(n), <code class="inline">SnapshotStorage</code> giữ lịch sử.</div>
+                    <div class="files">snapshot.rs · item.rs · delta.rs · writer.rs · storage.rs</div>
+                </div>
+            </div>
+            <div class="arrow-down">▲ dùng</div>
+            <div class="layer io">
+                <div class="tag">runtime<span class="kind">I/O · clock</span></div>
+                <div class="body">
+                    <div class="desc"><code class="inline">Runner</code> chạm <code class="inline">Instant</code> thật, đo elapsed time; <code class="inline">TickScheduler</code> tích lũy thời gian và sinh ra các <code class="inline">TickId</code> theo fixed-timestep.</div>
+                    <div class="files">runner.rs · scheduler.rs</div>
+                </div>
+            </div>
+            <div class="arrow-down">▲ dùng</div>
+            <div class="layer">
+                <div class="tag">world<span class="kind">simulation core</span></div>
+                <div class="body">
+                    <div class="desc">Trái tim engine: <code class="inline">World</code> giữ mọi entity, chạy <code class="inline">tick()</code> gọi vào gameplay, và tạo <code class="inline">snapshot()</code> khi cần replicate.</div>
+                    <div class="files">world/mod.rs</div>
+                </div>
+            </div>
+            <div class="arrow-down">▲ dùng</div>
+            <div class="layer">
+                <div class="tag">object / commands<span class="kind">gameplay contract</span></div>
+                <div class="body">
+                    <div class="desc">Trait <code class="inline">Object</code> mà gameplay code phải implement (<code class="inline">on_tick</code>, <code class="inline">write_snapshot</code>…); <code class="inline">Commands</code> là hàng đợi ghi trì hoãn cho spawn/despawn.</div>
+                    <div class="files">object.rs · commands.rs</div>
+                </div>
+            </div>
+            <div class="arrow-down">▲ dùng</div>
+            <div class="layer">
+                <div class="tag">entity<span class="kind">identity</span></div>
+                <div class="body">
+                    <div class="desc"><code class="inline">EntityId</code> (index+generation) và <code class="inline">Entity</code> (alive/enabled/parent/children) — metadata vòng đời, không chứa logic.</div>
+                    <div class="files">entity.rs · id.rs</div>
+                </div>
+            </div>
+            <div class="arrow-down">▲ dùng</div>
+            <div class="layer">
+                <div class="tag">time<span class="kind">foundation</span></div>
+                <div class="body">
+                    <div class="desc"><code class="inline">TickId(u64)</code> — đồng hồ logic của toàn simulation, không phải wall-clock. Được mọi tầng khác dùng chung.</div>
+                    <div class="files">time/mod.rs</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="section">
+        <h2><span class="num">02</span>Luồng thực thi — theo đúng thứ tự gọi hàm</h2>
+        <p class="lede">Đây là chuỗi sự kiện thật khi Cyclone chạy: từ lúc process khởi động, qua vòng lặp tick, tới lúc snapshot được nén thành delta và bắn qua TCP tới client — rồi chiều ngược lại khi client nhận. Tên hàm/struct dưới đây lấy trực tiếp từ mã nguồn.</p>
+
+        <div class="flow">
+            <div class="step" data-n="1">
+                <span class="step-phase">Khởi động</span>
+                <h3>Tạo World &amp; spawn entity ban đầu</h3>
+                <p><code class="inline">World::new()</code> rồi gọi <code class="inline">world.spawn(obj)</code> cho từng entity khởi đầu. Bên trong, <code class="inline">spawn()</code> đẩy <code class="inline">PendingCommand::Spawn</code> vào hàng đợi rồi <code class="inline">flush(TickId(0))</code> áp dụng ngay lập tức.</p>
+            </div>
+            <div class="step" data-n="2">
+                <span class="step-phase">Khởi động (nếu có networking)</span>
+                <h3>Mở cổng lắng nghe</h3>
+                <p><code class="inline">Server::bind(addr)</code> mở <code class="inline">TcpListener</code>; vòng lặp server gọi <code class="inline">server.accept()</code> (chặn) tới khi có client, trả về <code class="inline">Connection::new(stream)</code>.</p>
+            </div>
+            <div class="step" data-n="3">
+                <span class="step-phase">Vòng lặp chính</span>
+                <h3>Runner đo thời gian thật và sinh tick</h3>
+                <p><code class="inline">Runner::run()</code> lặp <code class="inline">while should_continue()</code>: đo <code class="inline">elapsed</code> từ <code class="inline">Instant::now()</code>, gọi <code class="inline">TickScheduler::advance(elapsed)</code> — hàm này tích luỹ elapsed vào accumulator và trả về <code class="inline">Vec&lt;TickId&gt;</code> (0, 1, hoặc nhiều tick nếu frame bị trễ — catch-up).</p>
+            </div>
+            <div class="step" data-n="4">
+                <span class="step-phase">Vòng lặp chính</span>
+                <h3>World chạy tick — gọi vào gameplay</h3>
+                <p>Với mỗi <code class="inline">TickId</code>, <code class="inline">World::tick()</code> duyệt mọi entity còn <code class="inline">alive &amp;&amp; enabled</code>, gọi <code class="inline">object.on_tick(&amp;TickInfo, &amp;mut Commands)</code> — đây là nơi code gameplay của người dùng chạy. Cuối tick, <code class="inline">flush()</code> áp dụng toàn bộ spawn/despawn đã hàng đợi (gọi <code class="inline">on_spawn</code>/<code class="inline">on_despawn</code>, cascade xuống children).</p>
+            </div>
+            <div class="step" data-n="5">
+                <span class="step-phase">Sau mỗi tick / định kỳ</span>
+                <h3>Chụp snapshot toàn world</h3>
+                <p><code class="inline">World::snapshot(tick)</code> duyệt entity còn sống, gọi <code class="inline">object.write_snapshot(&amp;mut SnapshotWriter)</code> để gameplay tự nguyện phơi field, đóng gói thành <code class="inline">SnapshotItem</code>, rồi <code class="inline">snapshot.sort()</code> theo <code class="inline">EntityId</code> (bất biến bắt buộc cho bước diff kế tiếp).</p>
+            </div>
+            <div class="step" data-n="6">
+                <span class="step-phase">Replication</span>
+                <h3>So sánh với baseline của từng client</h3>
+                <p>Mỗi client giữ 1 <code class="inline">SnapshotSender</code>. <code class="inline">next_message(&amp;latest)</code>: lần đầu trả <code class="inline">Outgoing::Snapshot</code> (full), các lần sau gọi <code class="inline">snapshot::diff(baseline, latest)</code> — merge tuyến tính O(n) trên 2 mảng đã sort — trả <code class="inline">Outgoing::Delta</code> chỉ chứa phần đổi.</p>
+            </div>
+            <div class="step" data-n="7">
+                <span class="step-phase">Replication → mạng</span>
+                <h3>Encode và gửi qua socket</h3>
+                <p><code class="inline">send_outgoing()</code> convert <code class="inline">Snapshot</code>/<code class="inline">SnapshotDelta</code> sang <code class="inline">WireSnapshot</code>/<code class="inline">WireDelta</code>, đóng gói thành <code class="inline">Packet</code> (header 9 byte: magic + version + kind + độ dài payload), rồi <code class="inline">Connection::send()</code> gọi <code class="inline">stream.write_all()</code> — điểm chạm socket duy nhất khi ghi.</p>
+            </div>
+            <div class="step" data-n="8">
+                <span class="step-phase">Phía nhận</span>
+                <h3>Ghép byte phân mảnh &amp; decode</h3>
+                <p><code class="inline">Connection::recv()</code> gọi <code class="inline">PacketReader::try_read_packet()</code>; nếu buffer chưa đủ header/payload thì đọc thêm từ <code class="inline">stream.read()</code> và <code class="inline">feed()</code> tiếp — xử lý đúng việc TCP có thể chia nhỏ 1 packet thành nhiều lần đọc.</p>
+            </div>
+            <div class="step" data-n="9">
+                <span class="step-phase">Phía nhận</span>
+                <h3>Tái tạo state từ delta</h3>
+                <p>Decode <code class="inline">WireSnapshot</code>/<code class="inline">WireDelta</code> về type nội bộ, rồi nếu là delta thì gọi <code class="inline">replication::apply(old, delta, tick)</code> — merge tuyến tính đối xứng với <code class="inline">diff()</code> — để dựng lại <code class="inline">Snapshot</code> mới nhất, cập nhật baseline cho lần nhận kế tiếp.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="section">
+        <h2><span class="num">03</span>Chi tiết từng tầng — struct/trait chính</h2>
+        <div class="cards">
+
+            <div class="card">
+                <div class="card-head"><h3>time</h3><span class="kindtag pure">pure</span></div>
+                <div class="path">src/time/mod.rs</div>
+                <p class="role">Đồng hồ logic của toàn simulation — chỉ là số đếm tick, không đọc wall-clock.</p>
+                <pre>pub struct TickId(pub u64);</pre>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><h3>entity</h3><span class="kindtag pure">pure</span></div>
+                <div class="path">src/entity/id.rs · entity.rs</div>
+                <p class="role">Định danh ổn định (index + generation) và metadata vòng đời (alive, enabled, parent/children). Không chứa logic gameplay.</p>
+                <pre>pub struct EntityId { index: u32, generation: u32 }
+
+pub struct Entity {
+    pub id: EntityId,
+    pub enabled: bool,
+    pub alive: bool,
+    pub parent: Option&lt;EntityId&gt;,
+    pub children: Vec&lt;EntityId&gt;,
+}</pre>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><h3>object / commands</h3><span class="kindtag pure">pure</span></div>
+                <div class="path">src/object.rs · src/commands.rs</div>
+                <p class="role">Hợp đồng mà mọi gameplay code phải tuân theo. <code class="inline">Object</code> không bao giờ giữ tham chiếu ngược lại World — chỉ nhận <code class="inline">&amp;TickInfo</code> để đọc và <code class="inline">&amp;mut Commands</code> để ghi ý định (spawn/despawn được hoãn tới khi <code class="inline">flush()</code> chạy).</p>
+                <pre>pub trait Object {
+    fn type_id(&amp;self) -&gt; u32;
+    fn on_tick(&amp;mut self, info: &amp;TickInfo, cmd: &amp;mut Commands);
+    fn on_spawn(&amp;mut self, _info: &amp;TickInfo, _cmd: &amp;mut Commands) {}
+    fn on_despawn(&amp;mut self, _info: &amp;TickInfo, _cmd: &amp;mut Commands) {}
+    fn write_snapshot(&amp;self, _writer: &amp;mut SnapshotWriter) {}
+}
+
+impl&lt;'a&gt; Commands&lt;'a&gt; {
+    pub fn spawn&lt;T: Object + 'static&gt;(&amp;mut self, obj: T) -&gt; EntityId
+    pub fn despawn(&amp;mut self, id: EntityId)
+}</pre>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><h3>world</h3><span class="kindtag pure">pure</span></div>
+                <div class="path">src/world/mod.rs</div>
+                <p class="role">Nguồn Snapshot duy nhất trong crate. Storage hiện là <code class="inline">Vec&lt;Box&lt;dyn Object&gt;&gt;</code> — README ghi rõ đây là lựa chọn tạm, sẽ đánh giá lại (SoA/archetype) sau khi có benchmark thật.</p>
+                <pre>pub fn tick(&amp;mut self, tick: TickId) {
+    for i in 0..self.entries.len() {
+        if !alive || !enabled { continue; }
+        let info = TickInfo { id, tick };
+        entries[i].object.on_tick(&amp;info, &amp;mut cmd);
+    }
+    self.flush(tick);
+}
+
+pub fn snapshot(&amp;self, tick: TickId) -&gt; Snapshot {
+    <span class="c">// mỗi entity ghi field qua SnapshotWriter,</span>
+    <span class="c">// item rỗng thì bỏ qua, cuối cùng sort() theo EntityId</span>
+}</pre>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><h3>runtime</h3><span class="kindtag io">I/O · clock</span></div>
+                <div class="path">src/runtime/runner.rs · scheduler.rs</div>
+                <p class="role">Tách bạch rõ: <code class="inline">TickScheduler</code> là toán học thuần (fixed-timestep, accumulator), <code class="inline">Runner</code> là nơi duy nhất chạm <code class="inline">Instant</code> thật. Lưu ý: <code class="inline">Runner</code> hiện chỉ drive <code class="inline">World</code> — chưa tự gọi snapshot/replication/net.</p>
+                <pre>pub fn advance(&amp;mut self, elapsed: Duration) -&gt; Vec&lt;TickId&gt;
+
+pub fn run(&amp;mut self, world: &amp;mut World, mut should_continue: impl FnMut() -&gt; bool) {
+    while should_continue() {
+        let elapsed = Instant::now() - last;
+        for tick in self.scheduler.advance(elapsed) {
+            world.tick(tick);
+        }
+    }
+}</pre>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><h3>snapshot</h3><span class="kindtag pure">pure</span></div>
+                <div class="path">src/snapshot/*.rs</div>
+                <p class="role">Không biết gì về UDP/TCP/Packet. <code class="inline">diff()</code>/<code class="inline">apply()</code> là một cặp merge tuyến tính O(n) đối xứng, dựa trên bất biến "2 mảng luôn đã sort theo EntityId".</p>
+                <pre>pub enum DeltaItem {
+    Spawn { item: SnapshotItem },
+    Update { id: EntityId, fields: Vec&lt;i32&gt; },
+    Remove { id: EntityId },
+}
+
+pub fn diff(old: Option&lt;&amp;Snapshot&gt;, new: &amp;Snapshot) -&gt; SnapshotDelta
+pub fn apply(old: &amp;Snapshot, delta: &amp;SnapshotDelta, tick: TickId) -&gt; Snapshot</pre>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><h3>protocol</h3><span class="kindtag pure">pure</span></div>
+                <div class="path">src/protocol/*.rs</div>
+                <p class="role">Adapter thuần: Wire type ↔ domain type, không biết World hay socket. Có giới hạn chống DoS khi decode input từ mạng (không cấp phát theo số attacker tự khai).</p>
+                <pre>pub const MAGIC: [u8; 2] = *b"CY";
+pub const HEADER_LEN: usize = 9; <span class="c">// magic(2)+version(2)+kind(1)+len(4)</span>
+pub const MAX_ITEM_COUNT: u32 = 10_000;
+
+pub struct Packet { pub version: ProtocolVersion, pub kind: MessageKind, pub payload: Vec&lt;u8&gt; }
+impl Packet {
+    pub fn encode(&amp;self) -&gt; Vec&lt;u8&gt;
+    pub fn decode(buf: &amp;[u8]) -&gt; Result&lt;Self, ProtocolError&gt;
+}</pre>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><h3>replication</h3><span class="kindtag pure">adapter</span></div>
+                <div class="path">src/replication/*.rs</div>
+                <p class="role">Quyết định "gửi full hay gửi delta" là logic thuần (<code class="inline">SnapshotSender</code>); việc thật sự chạm <code class="inline">Connection</code> nằm ở <code class="inline">packet_sender.rs</code>.</p>
+                <pre>pub struct SnapshotSender { baseline: Option&lt;Snapshot&gt; }
+impl SnapshotSender {
+    pub fn next_message(&amp;mut self, latest: &amp;Snapshot) -&gt; Outgoing {
+        match &amp;self.baseline {
+            None =&gt; Outgoing::Snapshot(latest.clone()),
+            Some(b) =&gt; Outgoing::Delta(diff(Some(b), latest)),
+        }
+    }
+}
+
+pub fn send_outgoing(conn: &amp;mut Connection, msg: &amp;Outgoing) -&gt; Result&lt;(), ConnectionError&gt;</pre>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><h3>net</h3><span class="kindtag io">I/O · socket</span></div>
+                <div class="path">src/net/*.rs</div>
+                <p class="role"><code class="inline">Connection</code> chỉ biết <code class="inline">Packet</code> thô — hoàn toàn không biết Snapshot. <code class="inline">PacketReader</code> là state machine ghép byte thuần, xử lý việc TCP phân mảnh packet qua nhiều lần <code class="inline">read()</code>.</p>
+                <pre>pub struct Connection { stream: TcpStream, reader: PacketReader }
+impl Connection {
+    pub fn send(&amp;mut self, packet: Packet) -&gt; Result&lt;(), ConnectionError&gt;
+    pub fn recv(&amp;mut self) -&gt; Result&lt;Packet, ConnectionError&gt;
+}</pre>
+            </div>
+
+        </div>
+    </section>
+
+    <section class="section">
+        <h2><span class="num">04</span>Nguyên tắc ranh giới đang chi phối kiến trúc</h2>
+        <p class="lede">Đây là các quy tắc thiết kế cứng của dự án — mọi module engine phải giữ được ngay cả khi xoá hết code gameplay.</p>
+        <div class="rules">
+            <div class="rule">
+                <span class="icon">→</span>
+                <p><strong>Gameplay → Engine, không bao giờ ngược lại.</strong> Engine không được biết khái niệm gameplay cụ thể (Tee, Hook, Weapon…). Xoá toàn bộ code gameplay thì engine vẫn phải compile được.</p>
+            </div>
+            <div class="rule">
+                <span class="icon">→</span>
+                <p><strong>World → Snapshot → Protocol → Transport</strong>, một chiều. Snapshot không biết UDP/Packet/Ack; Protocol chỉ là adapter Snapshot ↔ Packet, có thể có nhiều implementation song song mà engine không cần biết đang dùng cái nào.</p>
+            </div>
+            <div class="rule">
+                <span class="icon">→</span>
+                <p><strong>Object không bao giờ biết World, Snapshot hay mạng.</strong> Nó chỉ thấy <code class="inline">TickInfo</code>, <code class="inline">Commands</code>, <code class="inline">SnapshotWriter</code> — ranh giới này giữ gameplay độc lập hoàn toàn khỏi replication/networking.</p>
+            </div>
+            <div class="rule">
+                <span class="icon">→</span>
+                <p><strong>Mỗi cặp tầng tách logic thuần khỏi I/O thật:</strong> <code class="inline">TickScheduler</code> (thuần) vs <code class="inline">Runner</code> (chạm <code class="inline">Instant</code>); <code class="inline">PacketReader</code> (thuần) vs <code class="inline">Connection</code> (chạm <code class="inline">TcpStream</code>).</p>
+            </div>
+            <div class="rule">
+                <span class="icon">→</span>
+                <p><strong>1 crate, chỉ tách module — chưa tách nhiều crate, chưa ECS đầy đủ.</strong> Ưu tiên kiến trúc rõ ràng, đơn giản; tối ưu hoá backend lưu trữ sẽ quyết định sau khi có benchmark thật, không dựa trên giả định.</p>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        cyclone/ · headless deterministic multiplayer server framework · v0.1 simulation → v0.2 replication → v0.3 networking
+    </footer>
+
+</div>
+</body>
+</html>

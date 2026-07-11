@@ -72,6 +72,15 @@ impl World {
     /// nguyện phơi field của mình qua write_snapshot(), World chỉ đứng ra
     /// gọi lần lượt — đây là 1 read-pass thuần (&self khắp nơi), không
     /// đụng Commands, không có vấn đề mượn nào cả.
+    ///
+    /// TODO (roadmap): `World` hiện là nguồn Snapshot duy nhất trong crate.
+    /// Nếu sau này cần cắm backend ECS khác (Bevy, Hecs, Flecs...) vào cùng
+    /// pipeline replication, đây là chỗ tách 1 trait kiểu
+    /// `ReplicationBackend { fn snapshot(&self, tick: TickId) -> Snapshot }`.
+    /// Chưa tách bây giờ vì chỉ có 1 implementer (World) — trait với đúng 1
+    /// impl không phải điểm mở rộng thật, chữ ký (&self vs ECS World khác,
+    /// cần query gì, tick truyền sao) gần như chắc chắn phải đổi khi có
+    /// implementer thứ 2 thật sự xuất hiện.
     pub fn snapshot(&self, tick: TickId) -> Snapshot {
         let mut snapshot = Snapshot::new(tick);
         for entry in &self.entries {

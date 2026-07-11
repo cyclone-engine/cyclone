@@ -32,6 +32,19 @@ impl From<&DeltaItem> for WireDeltaItem {
     }
 }
 
+impl From<&WireDeltaItem> for DeltaItem {
+    fn from(item: &WireDeltaItem) -> Self {
+        match item {
+            WireDeltaItem::Spawn(item) => DeltaItem::Spawn { item: item.into() },
+            WireDeltaItem::Update { id, fields } => DeltaItem::Update {
+                id: (*id).into(),
+                fields: fields.clone(),
+            },
+            WireDeltaItem::Remove { id } => DeltaItem::Remove { id: (*id).into() },
+        }
+    }
+}
+
 impl WireEncode for WireDeltaItem {
     fn encode(&self, buf: &mut Vec<u8>) {
         match self {
@@ -100,6 +113,14 @@ impl From<&SnapshotDelta> for WireDelta {
     }
 }
 
+impl From<&WireDelta> for SnapshotDelta {
+    fn from(wire: &WireDelta) -> Self {
+        Self {
+            items: wire.items.iter().map(DeltaItem::from).collect(),
+        }
+    }
+}
+
 impl WireEncode for WireDelta {
     fn encode(&self, buf: &mut Vec<u8>) {
         assert!(
@@ -128,5 +149,22 @@ impl WireDecode for WireDelta {
             items.push(WireDeltaItem::decode(buf)?);
         }
         Ok(Self { items })
+    }
+}
+
+impl WireDelta {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        self.encode(&mut buf);
+        buf
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        let mut cursor = bytes;
+        let value = Self::decode(&mut cursor)?;
+        if !cursor.is_empty() {
+            return Err(ProtocolError::TrailingBytes);
+        }
+        Ok(value)
     }
 }

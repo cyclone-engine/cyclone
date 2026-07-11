@@ -221,3 +221,44 @@ fn snapshot_item_encode_panics_on_internal_field_overflow_bug() {
     let mut buf = Vec::new();
     item.encode(&mut buf);
 }
+
+/// Vector quy mô lớn sinh bởi `tools/generate_vectors.rs` (không phải tay
+/// tính như các file nhỏ ở trên) — dùng để verify hiệu năng/tính đúng đắn
+/// ở quy mô thật, và làm chuẩn cho benchmark. Vẫn là file đã commit, đọc
+/// lại chứ không tự sinh trong test.
+fn assert_golden_snapshot_scale(name: &str, expected_count: u32) {
+    let bytes = vector(name);
+
+    let decoded = WireSnapshot::from_bytes(&bytes).unwrap();
+    assert_eq!(decoded.tick, 1000);
+    assert_eq!(decoded.items.len(), expected_count as usize);
+
+    // Spot-check vài entity theo đúng công thức xác định trong
+    // generate_vectors.rs — phát hiện nếu generator hay decode lệch nhau.
+    assert_eq!(decoded.items[0].id.index, 0);
+    assert_eq!(decoded.items[0].fields, vec![0, 0, 0]);
+    let last = expected_count - 1;
+    assert_eq!(decoded.items[decoded.items.len() - 1].id.index, last);
+    assert_eq!(
+        decoded.items[decoded.items.len() - 1].fields,
+        vec![last as i32, last as i32 * 2, -(last as i32)]
+    );
+
+    // Round-trip đầy đủ: encode lại phải khớp bit-for-bit với file gốc.
+    assert_eq!(decoded.to_bytes(), bytes);
+}
+
+#[test]
+fn snapshot_100_matches_golden_bytes() {
+    assert_golden_snapshot_scale("snapshot_100.bin", 100);
+}
+
+#[test]
+fn snapshot_1000_matches_golden_bytes() {
+    assert_golden_snapshot_scale("snapshot_1000.bin", 1_000);
+}
+
+#[test]
+fn snapshot_10000_matches_golden_bytes() {
+    assert_golden_snapshot_scale("snapshot_10000.bin", 10_000);
+}
