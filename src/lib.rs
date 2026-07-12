@@ -1,17 +1,23 @@
 pub mod commands;
 pub mod entity;
+pub mod input;
 pub mod net;
 pub mod object;
 pub mod protocol;
 pub mod replication;
 pub mod runtime;
+pub mod server;
+pub mod session;
 pub mod snapshot;
 pub mod time;
 pub mod world;
 
 pub use commands::Commands;
 pub use entity::{Entity, EntityId};
-pub use object::{Object, TickInfo};
+pub use input::{CurrentInput, InputBatch, InputFrame};
+pub use object::{Object, TickContext, TickInfo};
 pub use runtime::{Runner, TickScheduler};
+pub use server::GameServer;
+pub use session::ClientSession;
 pub use time::TickId;
 pub use world::World;

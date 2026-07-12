@@ -6,6 +6,10 @@ use super::error::ProtocolError;
 /// chặn DoS bằng con số bịa ra trong 4 byte input.
 pub const MAX_ITEM_COUNT: u32 = 10_000;
 pub const MAX_FIELD_COUNT: u16 = 10_000;
+/// Trần cho payload input thô (WireInput.bytes) — cùng lý do MAX_ITEM_COUNT:
+/// chặn DoS bằng độ dài tự khai trong 4 byte đầu, không phải giới hạn
+/// nghiệp vụ. Input 1 tick không cần vượt vài KB.
+pub const MAX_INPUT_BYTES: u32 = 4096;
 
 /// Mọi số nguyên trên wire đều little-endian, tường minh qua to/from_le_bytes
 /// — không dùng transmute, không phụ thuộc target endianness hay layout
@@ -73,4 +77,24 @@ pub fn read_u64(buf: &mut &[u8]) -> Result<u64, ProtocolError> {
 pub fn read_i32(buf: &mut &[u8]) -> Result<i32, ProtocolError> {
     let bytes: [u8; 4] = take(buf, 4)?.try_into().unwrap();
     Ok(i32::from_le_bytes(bytes))
+}
+
+/// Length-prefixed raw bytes: u32 độ dài (LE) rồi tới bytes thô. Dùng cho
+/// payload mà engine không diễn giải cấu trúc bên trong (ví dụ WireInput).
+pub fn write_bytes(buf: &mut Vec<u8>, bytes: &[u8]) {
+    assert!(
+        bytes.len() <= MAX_INPUT_BYTES as usize,
+        "raw byte payload is {} bytes, exceeds MAX_INPUT_BYTES {MAX_INPUT_BYTES}",
+        bytes.len()
+    );
+    write_u32(buf, bytes.len() as u32);
+    buf.extend_from_slice(bytes);
+}
+
+pub fn read_bytes(buf: &mut &[u8], max_len: u32) -> Result<Vec<u8>, ProtocolError> {
+    let len = read_u32(buf)?;
+    if len > max_len {
+        return Err(ProtocolError::InputTooLarge { len, max: max_len });
+    }
+    Ok(take(buf, len as usize)?.to_vec())
 }

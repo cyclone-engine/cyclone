@@ -1,13 +1,28 @@
 use crate::commands::Commands;
 use crate::entity::EntityId;
+use crate::input::InputFrame;
 use crate::snapshot::SnapshotWriter;
 use crate::time::TickId;
 
-/// Dữ liệu thuần được World truyền vào Object mỗi lần gọi.
-/// Không phải World handle — không có method để truy vấn entity khác.
+/// Metadata thuần của tick — chỉ thông tin thuộc về bản thân tick, không
+/// phải dữ liệu runtime khác (input, prediction, authority...). Cố tình giữ
+/// nhỏ để không biến thành "god struct" khi engine có thêm khái niệm mới.
 pub struct TickInfo {
     pub id: EntityId,
     pub tick: TickId,
+}
+
+/// Dữ liệu thuần được World truyền vào Object mỗi lần gọi. Không phải World
+/// handle — không có method để truy vấn entity khác.
+///
+/// `input` tách khỏi `TickInfo` có chủ đích: input là dữ liệu runtime của
+/// tick này (có thể None nếu entity không có kết nối nào điều khiển, hoặc
+/// chưa nhận gói nào), khác bản chất với metadata tick. Field runtime khác
+/// sau này (prediction, authority, latency...) sẽ thêm vào TickContext,
+/// không nhét vào TickInfo.
+pub struct TickContext<'a> {
+    pub info: TickInfo,
+    pub input: Option<&'a InputFrame>,
 }
 
 /// Object chỉ biết xử lý logic của chính nó và gửi yêu cầu qua Commands.
@@ -19,9 +34,9 @@ pub trait Object {
     /// hợp lý (mặc định 0 sẽ gây đụng độ âm thầm giữa các loại quên khai báo).
     fn type_id(&self) -> u32;
 
-    fn on_spawn(&mut self, _info: &TickInfo, _cmd: &mut Commands) {}
-    fn on_tick(&mut self, info: &TickInfo, cmd: &mut Commands);
-    fn on_despawn(&mut self, _info: &TickInfo, _cmd: &mut Commands) {}
+    fn on_spawn(&mut self, _ctx: &TickContext, _cmd: &mut Commands) {}
+    fn on_tick(&mut self, ctx: &TickContext, cmd: &mut Commands);
+    fn on_despawn(&mut self, _ctx: &TickContext, _cmd: &mut Commands) {}
 
     /// Object tự nguyện phơi bày state của mình; World không đọc lén,
     /// Object không biết gì về client/network. Mặc định không ghi gì —

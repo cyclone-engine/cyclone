@@ -1,5 +1,5 @@
 use cyclone::snapshot::{diff, DeltaItem, Snapshot, SnapshotItem, SnapshotWriter};
-use cyclone::{Commands, Object, TickId, TickInfo, World};
+use cyclone::{Commands, InputBatch, Object, TickContext, TickId, World};
 
 struct Player {
     x: i32,
@@ -11,7 +11,7 @@ impl Object for Player {
         1
     }
 
-    fn on_tick(&mut self, _info: &TickInfo, _cmd: &mut Commands) {
+    fn on_tick(&mut self, _ctx: &TickContext, _cmd: &mut Commands) {
         self.x += 1;
     }
 
@@ -30,7 +30,7 @@ impl Object for ServerOnlyTimer {
         99
     }
 
-    fn on_tick(&mut self, _info: &TickInfo, _cmd: &mut Commands) {}
+    fn on_tick(&mut self, _ctx: &TickContext, _cmd: &mut Commands) {}
 }
 
 #[test]
@@ -39,7 +39,7 @@ fn snapshot_contains_only_replicated_entities() {
     world.spawn(Player { x: 0, y: 5 });
     world.spawn(ServerOnlyTimer);
 
-    world.tick(TickId(0));
+    world.tick(TickId(0), &InputBatch::new());
 
     let snap = world.snapshot(TickId(0));
 
@@ -107,7 +107,7 @@ fn run_and_snapshot() -> Snapshot {
     world.spawn(Player { x: 10, y: -3 });
 
     for t in 0..20 {
-        world.tick(TickId(t));
+        world.tick(TickId(t), &InputBatch::new());
     }
 
     world.snapshot(TickId(20))

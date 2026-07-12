@@ -18,13 +18,15 @@ pub const MAX_PACKET_SIZE: usize = 1 << 20;
 /// thật với `decode()`, không hard-code lại offset ở module khác.
 pub const HEADER_LEN: usize = 9;
 
-/// Loại payload bên trong packet. Chỉ 2 giá trị cho v0.2.5; thêm loại mới
-/// phải append cuối, không đổi số đã gán (đó là hợp đồng đã gửi ra ngoài).
+/// Loại payload bên trong packet. Thêm loại mới phải append cuối, không đổi
+/// số đã gán (đó là hợp đồng đã gửi ra ngoài).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum MessageKind {
     Snapshot = 0,
     Delta = 1,
+    /// v0.4: client → server, mang WireInput.
+    Input = 2,
 }
 
 impl MessageKind {
@@ -36,6 +38,7 @@ impl MessageKind {
         match value {
             0 => Ok(MessageKind::Snapshot),
             1 => Ok(MessageKind::Delta),
+            2 => Ok(MessageKind::Input),
             other => Err(ProtocolError::InvalidMessageKind(other)),
         }
     }

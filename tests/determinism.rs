@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use cyclone::{Commands, Object, TickId, TickInfo, World};
+use cyclone::{Commands, InputBatch, Object, TickContext, TickId, World};
 
 // Lưu ý: RefCell ở đây chỉ để test thu thập log quan sát được, không phải
 // cơ chế truy cập trong lõi engine — Object vẫn chỉ nhận &mut self + Commands.
@@ -16,7 +16,7 @@ impl Object for Recorder {
         1
     }
 
-    fn on_tick(&mut self, _info: &TickInfo, _cmd: &mut Commands) {
+    fn on_tick(&mut self, _ctx: &TickContext, _cmd: &mut Commands) {
         self.value += self.step;
         self.log.borrow_mut().push(self.value);
     }
@@ -37,7 +37,7 @@ fn run_simulation() -> Vec<i64> {
     });
 
     for t in 0..10 {
-        world.tick(TickId(t));
+        world.tick(TickId(t), &InputBatch::new());
     }
 
     log.borrow().clone()

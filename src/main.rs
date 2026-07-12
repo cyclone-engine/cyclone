@@ -1,4 +1,4 @@
-use cyclone::{Commands, Object, TickId, TickInfo, World};
+use cyclone::{Commands, InputBatch, Object, TickContext, TickId, World};
 
 struct Player {
     position: i64,
@@ -10,11 +10,11 @@ impl Object for Player {
         1
     }
 
-    fn on_tick(&mut self, info: &TickInfo, _cmd: &mut Commands) {
+    fn on_tick(&mut self, ctx: &TickContext, _cmd: &mut Commands) {
         self.position += self.velocity;
         println!(
             "[tick {}] entity {:?} position = {}",
-            info.tick.0, info.id, self.position
+            ctx.info.tick.0, ctx.info.id, self.position
         );
     }
 }
@@ -27,6 +27,6 @@ fn main() {
     });
 
     for t in 0..5 {
-        world.tick(TickId(t));
+        world.tick(TickId(t), &InputBatch::new());
     }
 }

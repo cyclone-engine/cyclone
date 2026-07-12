@@ -3,7 +3,7 @@
 
 use cyclone::replication::apply;
 use cyclone::snapshot::{diff, Snapshot, SnapshotItem};
-use cyclone::{Commands, Object, TickId, TickInfo, World};
+use cyclone::{Commands, InputBatch, Object, TickContext, TickId, World};
 
 struct Player {
     x: i32,
@@ -15,7 +15,7 @@ impl Object for Player {
         1
     }
 
-    fn on_tick(&mut self, _info: &TickInfo, _cmd: &mut Commands) {
+    fn on_tick(&mut self, _ctx: &TickContext, _cmd: &mut Commands) {
         self.x += 1;
     }
 
@@ -32,8 +32,8 @@ fn apply_reverses_diff_for_updates() {
     world.spawn(Player { x: 100, y: -3 });
 
     let old = world.snapshot(TickId(0));
-    world.tick(TickId(0));
-    world.tick(TickId(1));
+    world.tick(TickId(0), &InputBatch::new());
+    world.tick(TickId(1), &InputBatch::new());
     let new = world.snapshot(TickId(2));
 
     let delta = diff(Some(&old), &new);

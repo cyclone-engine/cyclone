@@ -20,6 +20,9 @@ pub enum ProtocolError {
     /// split_at/to_vec theo con số này, phòng khi tương lai buffer đến từ
     /// TCP stream đã đủ lớn để không bị UnexpectedEof chặn giùm.
     PayloadTooLarge { len: usize, max: usize },
+    /// Độ dài byte thô (ví dụ WireInput.bytes) tự khai trong buffer vượt
+    /// giới hạn cho phép — cùng lý do TooManyItems, chặn trước khi cấp phát.
+    InputTooLarge { len: u32, max: u32 },
 }
 
 impl fmt::Display for ProtocolError {
@@ -39,6 +42,9 @@ impl fmt::Display for ProtocolError {
             }
             Self::PayloadTooLarge { len, max } => {
                 write!(f, "payload_len {len} exceeds max {max}")
+            }
+            Self::InputTooLarge { len, max } => {
+                write!(f, "input byte length {len} exceeds max {max}")
             }
         }
     }

@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use super::scheduler::TickScheduler;
+use crate::input::InputBatch;
 use crate::world::World;
 
 /// Lớp duy nhất chạm vào wall-clock thật. Scheduler bên trong vẫn thuần túy.
@@ -15,6 +16,11 @@ impl Runner {
         }
     }
 
+    /// Chỉ phục vụ offline simulation (không networking) — luôn tick với
+    /// InputBatch rỗng. GameServer (v0.4) không dùng Runner: nó cần chèn
+    /// drain input trước tick và broadcast snapshot sau tick, nên tự viết
+    /// loop riêng bằng TickScheduler::advance() thay vì mở rộng Runner
+    /// thành runtime mạng.
     pub fn run(&mut self, world: &mut World, mut should_continue: impl FnMut() -> bool) {
         let mut last = Instant::now();
         while should_continue() {
@@ -22,7 +28,7 @@ impl Runner {
             let elapsed = now - last;
             last = now;
             for tick in self.scheduler.advance(elapsed) {
-                world.tick(tick);
+                world.tick(tick, &InputBatch::new());
             }
         }
     }

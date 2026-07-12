@@ -1,4 +1,4 @@
-use cyclone::{Commands, Object, TickId, TickInfo, World};
+use cyclone::{Commands, InputBatch, Object, TickContext, TickId, World};
 
 struct Counter {
     value: i64,
@@ -10,11 +10,11 @@ impl Object for Counter {
         1
     }
 
-    fn on_tick(&mut self, info: &TickInfo, _cmd: &mut Commands) {
+    fn on_tick(&mut self, ctx: &TickContext, _cmd: &mut Commands) {
         self.value += self.step;
         println!(
             "tick {} | entity {:?} | value = {}",
-            info.tick.0, info.id, self.value
+            ctx.info.tick.0, ctx.info.id, self.value
         );
     }
 }
@@ -28,6 +28,6 @@ fn main() {
     });
 
     for t in 0..5 {
-        world.tick(TickId(t));
+        world.tick(TickId(t), &InputBatch::new());
     }
 }

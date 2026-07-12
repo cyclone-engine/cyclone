@@ -1,6 +1,7 @@
 use crate::commands::{Commands, PendingCommand};
 use crate::entity::{Entity, EntityId};
-use crate::object::{Object, TickInfo};
+use crate::input::InputBatch;
+use crate::object::{Object, TickContext, TickInfo};
 use crate::snapshot::{Snapshot, SnapshotItem, SnapshotWriter};
 use crate::time::TickId;
 
@@ -30,6 +31,11 @@ impl World {
     }
 
     /// Spawn trực tiếp, dùng khi thiết lập World ban đầu (trước khi tick chạy).
+    /// Flush ngay với TickId(0) — CHỈ đúng lúc setup, trước vòng tick thật.
+    /// Không dùng hàm này để spawn khi World đã tick được 1 lúc rồi (ví dụ
+    /// player join giữa ván) — on_spawn() sẽ nhận nhầm tick 0. Muốn spawn
+    /// đúng tick hiện tại lúc World đang chạy, dùng `commands()` rồi để
+    /// `tick()` kế tiếp tự flush với tick thật.
     pub fn spawn<T: Object + 'static>(&mut self, obj: T) -> EntityId {
         let id = {
             let mut cmd = Commands {
@@ -49,21 +55,68 @@ impl World {
             .filter(|e| e.id == id)
     }
 
+    /// Commands dùng ngoài vòng tick bình thường (ví dụ GameServer spawn
+    /// entity cho connection mới). Lệnh chỉ vào hàng đợi `pending` — không
+    /// flush ngay ở đây, việc flush thật sự chờ `tick()` kế tiếp gọi, nên
+    /// on_spawn/on_despawn luôn nhận đúng tick hiện tại, không hardcode.
+    /// Đây là API queue DUY NHẤT của World — Object::on_tick cũng nhận
+    /// Commands dựng theo đúng cách này, tránh 2 API cùng ý nghĩa.
+    pub fn commands(&mut self) -> Commands<'_> {
+        Commands {
+            next_index: &mut self.next_index,
+            pending: &mut self.pending,
+        }
+    }
+
     /// Chạy đúng 1 tick: mỗi object tự cập nhật chính nó, không object nào
     /// có quyền truy cập object khác. Commands do các object phát ra được
     /// gom lại và áp dụng sau khi toàn bộ object đã tick xong (deterministic).
-    pub fn tick(&mut self, tick: TickId) {
+    ///
+    /// `inputs` được merge với `entries` bằng 2 con trỏ song song (giống
+    /// `snapshot::diff()`/`apply()`), không tra cứu ngẫu nhiên theo từng
+    /// entity — vì `entries` đã tự nhiên theo thứ tự EntityId tăng dần
+    /// (index trực tiếp bằng EntityId.index(), xem apply_spawn) và
+    /// `InputBatch` luôn giữ bất biến đã sort. Độ phức tạp O(entities +
+    /// input.len()), không phụ thuộc cách nào lớn hơn cách kia.
+    pub fn tick(&mut self, tick: TickId, inputs: &InputBatch) {
+        let mut input_iter = inputs.iter().peekable();
+
         for i in 0..self.entries.len() {
+            let id = self.entries[i].entity.id;
+
+            // Input orphan (trỏ tới id nhỏ hơn id hiện tại — entity đã
+            // despawn, disabled, hoặc chưa từng tồn tại) bị bỏ qua ở đây,
+            // kể cả khi entity hiện tại không alive/enabled: nếu vậy vòng
+            // while này sẽ tự loại input của nó ở lượt entity kế tiếp.
+            while let Some((iid, _)) = input_iter.peek() {
+                if *iid < id {
+                    input_iter.next();
+                } else {
+                    break;
+                }
+            }
+
             if !self.entries[i].entity.alive || !self.entries[i].entity.enabled {
                 continue;
             }
-            let id = self.entries[i].entity.id;
-            let info = TickInfo { id, tick };
+
+            let input = match input_iter.peek() {
+                Some((iid, _)) if *iid == id => {
+                    let (_, frame) = input_iter.next().unwrap();
+                    Some(frame)
+                }
+                _ => None,
+            };
+
+            let ctx = TickContext {
+                info: TickInfo { id, tick },
+                input,
+            };
             let mut cmd = Commands {
                 next_index: &mut self.next_index,
                 pending: &mut self.pending,
             };
-            self.entries[i].object.on_tick(&info, &mut cmd);
+            self.entries[i].object.on_tick(&ctx, &mut cmd);
         }
         self.flush(tick);
     }
@@ -107,7 +160,7 @@ impl World {
     /// sinh từ on_spawn/on_despawn (nếu object gọi cmd.spawn/despawn bên
     /// trong callback đó) sẽ nằm lại trong `self.pending` và đợi flush của
     /// tick kế tiếp — không xử lý đệ quy trong lần gọi này, để tránh treo
-    /// engine nếu gameplay lỡ tạo chuỗi spawn/despawn nối tiếp vô hạn.
+    /// engine nếu gameplay lỡ tạo chuỗi spawn/despawn nối tiếp nhau.
     fn flush(&mut self, tick: TickId) {
         let ops = std::mem::take(&mut self.pending);
         for op in ops {
@@ -152,12 +205,15 @@ impl World {
             }
         }
 
-        let info = TickInfo { id, tick };
+        let ctx = TickContext {
+            info: TickInfo { id, tick },
+            input: None,
+        };
         let mut cmd = Commands {
             next_index: &mut self.next_index,
             pending: &mut self.pending,
         };
-        self.entries[idx].object.on_spawn(&info, &mut cmd);
+        self.entries[idx].object.on_spawn(&ctx, &mut cmd);
     }
 
     /// Đệ quy xuống children khi entity bị despawn (cascade), và dọn tham
@@ -182,12 +238,15 @@ impl World {
 
         let children = self.entries[idx].entity.children.clone();
 
-        let info = TickInfo { id, tick };
+        let ctx = TickContext {
+            info: TickInfo { id, tick },
+            input: None,
+        };
         let mut cmd = Commands {
             next_index: &mut self.next_index,
             pending: &mut self.pending,
         };
-        self.entries[idx].object.on_despawn(&info, &mut cmd);
+        self.entries[idx].object.on_despawn(&ctx, &mut cmd);
         self.entries[idx].entity.alive = false;
 
         for child in children {

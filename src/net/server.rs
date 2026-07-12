@@ -1,10 +1,12 @@
 use std::io;
 use std::net::{TcpListener, ToSocketAddrs};
 
-use super::connection::Connection;
+use super::connection::{Connection, ConnectionReader, ConnectionWriter};
 
-/// Blocking accept loop — v0.3 chưa cần async runtime. Mỗi `accept()` trả
-/// về 1 `Connection` độc lập; điều phối nhiều connection cùng lúc (thread
+/// Blocking accept loop — v0.4 chưa cần async runtime. Mỗi `accept()` trả
+/// thẳng `(ConnectionReader, ConnectionWriter)` đã tách sẵn — Cyclone không
+/// có API nào trả về 1 connection 2 chiều chưa tách, xem lý do ở
+/// `connection::Connection`. Điều phối nhiều connection cùng lúc (thread
 /// per connection hay khác) là việc của caller, không phải của Server.
 pub struct Server {
     listener: TcpListener,
@@ -20,8 +22,8 @@ impl Server {
         self.listener.local_addr()
     }
 
-    pub fn accept(&self) -> io::Result<Connection> {
+    pub fn accept(&self) -> io::Result<(ConnectionReader, ConnectionWriter)> {
         let (stream, _addr) = self.listener.accept()?;
-        Ok(Connection::new(stream))
+        Connection::new(stream).into_split()
     }
 }
