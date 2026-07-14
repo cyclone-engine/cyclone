@@ -16,11 +16,16 @@
 //! (Wire::from -> Packet::new -> conn.send) — cố ý chưa generic hoá, chỉ 2
 //! hàm nhỏ. Nếu số message kind tăng đáng kể (Ping/Ack/Login/Disconnect...),
 //! cân nhắc 1 trait `IntoPacket`/`PacketEncoder`.
+//!
+//! v0.5: `send_input` đã chuyển sang `client::input` (không còn ở đây nữa).
+//! Input không phải "replication" — không có quyết định full/delta gì cả,
+//! chỉ là encode+gửi 1 chiều client -> server, đúng vai trò của tầng
+//! `client`, đối xứng với việc `client::snapshot_cache` tự decode
+//! Snapshot/Delta thẳng chứ không qua `replication` (Quyết định #6, v0.4).
 
 use crate::net::{ConnectionError, ConnectionWriter};
-use crate::protocol::{MessageKind, Packet, WireDelta, WireInput, WireSnapshot};
+use crate::protocol::{MessageKind, Packet, WireDelta, WireSnapshot};
 use crate::snapshot::{Snapshot, SnapshotDelta};
-use crate::time::TickId;
 
 use super::Outgoing;
 
@@ -41,10 +46,4 @@ pub fn send_outgoing(conn: &mut ConnectionWriter, message: &Outgoing) -> Result<
         Outgoing::Snapshot(snapshot) => send_snapshot(conn, snapshot),
         Outgoing::Delta(delta) => send_delta(conn, delta),
     }
-}
-
-/// Chiều client → server: gửi input thô của 1 tick.
-pub fn send_input(conn: &mut ConnectionWriter, tick: TickId, bytes: Vec<u8>) -> Result<(), ConnectionError> {
-    let wire = WireInput { tick: tick.0, bytes };
-    conn.send(Packet::new(MessageKind::Input, wire.to_bytes()))
 }

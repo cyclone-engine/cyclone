@@ -1,8 +1,9 @@
 use crate::snapshot::{DeltaItem, SnapshotDelta};
+use crate::time::TickId;
 
 use super::codec::{
-    read_i32, read_u16, read_u32, read_u8, write_i32, write_u16, write_u32, write_u8,
-    MAX_FIELD_COUNT, MAX_ITEM_COUNT,
+    read_i32, read_u16, read_u32, read_u64, read_u8, write_i32, write_u16, write_u32, write_u64,
+    write_u8, MAX_FIELD_COUNT, MAX_ITEM_COUNT,
 };
 use super::error::ProtocolError;
 use super::snapshot::{NetEntityId, WireSnapshotItem};
@@ -100,14 +101,16 @@ impl WireDecode for WireDeltaItem {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WireDelta {
+    pub tick: u64,
     pub items: Vec<WireDeltaItem>,
 }
 
 impl From<&SnapshotDelta> for WireDelta {
     fn from(delta: &SnapshotDelta) -> Self {
         Self {
+            tick: delta.tick.0,
             items: delta.items.iter().map(WireDeltaItem::from).collect(),
         }
     }
@@ -116,6 +119,7 @@ impl From<&SnapshotDelta> for WireDelta {
 impl From<&WireDelta> for SnapshotDelta {
     fn from(wire: &WireDelta) -> Self {
         Self {
+            tick: TickId(wire.tick),
             items: wire.items.iter().map(DeltaItem::from).collect(),
         }
     }
@@ -123,6 +127,7 @@ impl From<&WireDelta> for SnapshotDelta {
 
 impl WireEncode for WireDelta {
     fn encode(&self, buf: &mut Vec<u8>) {
+        write_u64(buf, self.tick);
         assert!(
             self.items.len() <= MAX_ITEM_COUNT as usize,
             "WireDelta has {} items, exceeds MAX_ITEM_COUNT {MAX_ITEM_COUNT}",
@@ -137,6 +142,7 @@ impl WireEncode for WireDelta {
 
 impl WireDecode for WireDelta {
     fn decode(buf: &mut &[u8]) -> Result<Self, ProtocolError> {
+        let tick = read_u64(buf)?;
         let item_count = read_u32(buf)?;
         if item_count > MAX_ITEM_COUNT {
             return Err(ProtocolError::TooManyItems {
@@ -148,7 +154,7 @@ impl WireDecode for WireDelta {
         for _ in 0..item_count {
             items.push(WireDeltaItem::decode(buf)?);
         }
-        Ok(Self { items })
+        Ok(Self { tick, items })
     }
 }
 

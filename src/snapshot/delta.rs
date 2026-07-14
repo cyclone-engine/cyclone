@@ -1,6 +1,7 @@
 use super::item::SnapshotItem;
 use super::snapshot::Snapshot;
 use crate::entity::EntityId;
+use crate::time::TickId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeltaItem {
@@ -22,8 +23,9 @@ impl DeltaItem {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotDelta {
+    pub tick: TickId,
     pub items: Vec<DeltaItem>,
 }
 
@@ -31,8 +33,14 @@ pub struct SnapshotDelta {
 /// hay Object. Yêu cầu: `old` và `new` phải đã sort theo EntityId (Snapshot
 /// tự làm việc này khi World tạo ra), để merge tuyến tính thay vì cần
 /// HashMap.
+///
+/// `delta.tick` luôn lấy từ `new.tick` — đây là tick mà delta này áp dụng
+/// TỚI (baseline + delta = state tại tick này), không phải tick của baseline.
 pub fn diff(old: Option<&Snapshot>, new: &Snapshot) -> SnapshotDelta {
-    let mut delta = SnapshotDelta::default();
+    let mut delta = SnapshotDelta {
+        tick: new.tick,
+        items: Vec::new(),
+    };
 
     let Some(old) = old else {
         for item in &new.items {

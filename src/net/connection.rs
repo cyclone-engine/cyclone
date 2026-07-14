@@ -1,5 +1,5 @@
 use std::io::{self, Read, Write};
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream};
 
 use crate::protocol::Packet;
 
@@ -100,5 +100,25 @@ impl ConnectionWriter {
     pub fn send(&mut self, packet: Packet) -> Result<(), ConnectionError> {
         self.stream.write_all(&packet.encode())?;
         Ok(())
+    }
+}
+
+/// `ConnectionReader`/`ConnectionWriter` luôn đi theo cặp `try_clone()` —
+/// 2 fd khác nhau cùng trỏ vào 1 socket kernel. `ConnectionReader` thường
+/// sống trên 1 thread nền riêng (blocking `recv()`), còn `ConnectionWriter`
+/// nằm trong struct sống ngắn hơn hoặc bị drop khi caller chủ động ngắt kết
+/// nối (`GameClient`/`ClientSession` bị drop). Nếu chỉ drop `ConnectionWriter`
+/// mà không làm gì thêm, fd của nó đóng nhưng KHÔNG đóng fd còn lại — thread
+/// đọc sẽ treo mãi trong `recv()` vì socket vẫn "sống" từ góc nhìn của nó
+/// (thread leak thật, không phải lý thuyết).
+///
+/// `shutdown(Both)` gọi trên 1 fd tác động tới toàn bộ socket kernel bên
+/// dưới, không riêng fd đó — nên gọi nó khi `ConnectionWriter` bị drop sẽ
+/// làm `read()` đang block trên `ConnectionReader` (fd khác, cùng socket)
+/// nhận EOF/lỗi ngay lập tức, thread đọc thoát vòng lặp tự nhiên. Không cần
+/// tự quản `JoinHandle`/kênh tín hiệu riêng cho việc này.
+impl Drop for ConnectionWriter {
+    fn drop(&mut self) {
+        let _ = self.stream.shutdown(Shutdown::Both);
     }
 }

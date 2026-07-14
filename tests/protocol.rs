@@ -59,6 +59,7 @@ fn delta_spawn_matches_golden_bytes() {
     let bytes = vector("delta_spawn.bin");
 
     let decoded = WireDelta::decode(&mut bytes.as_slice()).unwrap();
+    assert_eq!(decoded.tick, 10);
     assert_eq!(
         decoded.items,
         vec![WireDeltaItem::Spawn(WireSnapshotItem {
@@ -79,6 +80,7 @@ fn delta_update_matches_golden_bytes() {
     let bytes = vector("delta_update.bin");
 
     let decoded = WireDelta::decode(&mut bytes.as_slice()).unwrap();
+    assert_eq!(decoded.tick, 11);
     assert_eq!(
         decoded.items,
         vec![WireDeltaItem::Update {
@@ -98,6 +100,7 @@ fn delta_remove_matches_golden_bytes() {
     let bytes = vector("delta_remove.bin");
 
     let decoded = WireDelta::decode(&mut bytes.as_slice()).unwrap();
+    assert_eq!(decoded.tick, 12);
     assert_eq!(
         decoded.items,
         vec![WireDeltaItem::Remove {
@@ -156,7 +159,9 @@ fn snapshot_decode_rejects_huge_item_count_before_allocating() {
 
 #[test]
 fn delta_decode_rejects_huge_item_count_before_allocating() {
-    let bytes = u32::MAX.to_le_bytes(); // item_count = 4 tỷ, không có payload
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&0u64.to_le_bytes()); // tick
+    bytes.extend_from_slice(&u32::MAX.to_le_bytes()); // item_count = 4 tỷ, không có payload
 
     let err = WireDelta::decode(&mut bytes.as_slice()).unwrap_err();
     assert_eq!(

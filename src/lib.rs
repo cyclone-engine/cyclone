@@ -1,3 +1,4 @@
+pub mod client;
 pub mod commands;
 pub mod entity;
 pub mod input;
@@ -12,6 +13,7 @@ pub mod snapshot;
 pub mod time;
 pub mod world;
 
+pub use client::{ClientError, ConnectionState, GameClient};
 pub use commands::Commands;
 pub use entity::{Entity, EntityId};
 pub use input::{CurrentInput, InputBatch, InputFrame};

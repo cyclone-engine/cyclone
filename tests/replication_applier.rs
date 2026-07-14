@@ -1,5 +1,6 @@
 //! apply() phải là phép toán ngược chính xác của diff(): với mọi
-//! (old, new) hợp lệ, apply(old, diff(old, new), new.tick) == new.
+//! (old, new) hợp lệ, apply(old, diff(old, new)) == new (delta tự mang
+//! tick của new, không cần truyền rời).
 
 use cyclone::replication::apply;
 use cyclone::snapshot::{diff, Snapshot, SnapshotItem};
@@ -37,7 +38,7 @@ fn apply_reverses_diff_for_updates() {
     let new = world.snapshot(TickId(2));
 
     let delta = diff(Some(&old), &new);
-    let applied = apply(&old, &delta, new.tick);
+    let applied = apply(&old, &delta);
 
     assert_eq!(applied, new);
 }
@@ -83,7 +84,7 @@ fn apply_handles_spawn_update_remove_mixed() {
     };
 
     let delta = diff(Some(&old), &new);
-    let applied = apply(&old, &delta, new.tick);
+    let applied = apply(&old, &delta);
 
     assert_eq!(applied, new);
 }
@@ -96,7 +97,7 @@ fn apply_from_empty_baseline_equals_full_snapshot() {
 
     let empty = Snapshot::new(TickId(0));
     let delta = diff(None, &new);
-    let applied = apply(&empty, &delta, new.tick);
+    let applied = apply(&empty, &delta);
 
     assert_eq!(applied, new);
 }

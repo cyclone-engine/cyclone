@@ -2,7 +2,9 @@
 //! xác nhận PacketReader + Connection hoạt động đúng với 1 socket kernel
 //! thật, kể cả khi TCP giao dữ liệu rời rạc.
 
+use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 
 use cyclone::net::{Client, Server};
 use cyclone::protocol::MessageKind;
@@ -57,6 +59,7 @@ fn sends_delta_and_receives_it_on_the_other_end() {
     let mut world = World::new();
     let id = world.spawn(Player);
     let delta = SnapshotDelta {
+        tick: TickId(1),
         items: vec![cyclone::snapshot::DeltaItem::Update {
             id,
             fields: vec![1, -1],
@@ -138,4 +141,39 @@ fn recv_reports_closed_when_peer_disconnects_without_sending() {
         server_reader.recv(),
         Err(cyclone::net::ConnectionError::Closed)
     ));
+}
+
+/// Xác nhận fix cho thread leak: `ConnectionReader` sống trên 1 thread nền
+/// (đúng pattern `ClientSession`/`ClientConnection`), `ConnectionWriter`
+/// giữ ở nơi khác trên cùng 1 bên (client hoặc server) — chỉ drop
+/// `ConnectionWriter` một mình, KHÔNG drop `ConnectionReader`, phải khiến
+/// `recv()` đang block trên thread kia unblock ngay (nhờ `Drop for
+/// ConnectionWriter` gọi `shutdown(Both)`, tác động tới cả socket kernel
+/// dùng chung bởi 2 fd `try_clone()`), không treo mãi.
+#[test]
+fn dropping_writer_alone_unblocks_reader_on_the_same_side() {
+    let server = Server::bind("127.0.0.1:0").unwrap();
+    let addr = server.local_addr().unwrap();
+
+    let (mut client_reader, client_writer) = Client::connect(addr).unwrap();
+    let (done_tx, done_rx) = mpsc::channel();
+    let reader_thread = thread::spawn(move || {
+        let result = client_reader.recv();
+        let _ = done_tx.send(result.is_err());
+    });
+
+    // Server accept nhưng không gửi/đóng gì — giữ kết nối sống để
+    // reader_thread thật sự đang block trong recv(), không tự thoát vì lý
+    // do khác.
+    let _server_pair = server.accept().unwrap();
+    thread::sleep(Duration::from_millis(100));
+
+    drop(client_writer); // chỉ drop writer — đúng kịch bản GameClient bị drop
+
+    let unblocked = done_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("reader thread không unblock trong 2s — thread leak");
+    assert!(unblocked, "recv() phải trả lỗi sau khi writer bị drop");
+
+    reader_thread.join().unwrap();
 }

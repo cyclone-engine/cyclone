@@ -1,10 +1,8 @@
 use crate::snapshot::{DeltaItem, Snapshot, SnapshotDelta, SnapshotItem};
-use crate::time::TickId;
 
-/// Phép toán ngược của `snapshot::diff`: (old, delta) -> new. Tick không
-/// nằm trong SnapshotDelta (wire chỉ gửi phần dữ liệu thay đổi, không gửi
-/// lại tick number) nên caller — vốn đã tự đếm tick cục bộ qua
-/// TickScheduler — truyền vào tường minh.
+/// Phép toán ngược của `snapshot::diff`: (old, delta) -> new. Tick lấy
+/// thẳng từ `delta.tick` (v0.5: SnapshotDelta/WireDelta tự mang tick thật
+/// trên wire, không còn phải để caller tự đếm và đoán — xem docs/versions/v0.5).
 ///
 /// Yêu cầu (bất biến, không kiểm tra runtime ngoài debug_assert): `old.items`
 /// đã sort theo EntityId — bất biến Snapshot tự giữ — và `delta.items` đã ở
@@ -12,16 +10,16 @@ use crate::time::TickId;
 /// tuyến tính 2 danh sách đã sort. Nhờ vậy `apply()` merge tuyến tính O(n),
 /// đối xứng hoàn toàn với cách `diff()` được viết, không cần HashMap.
 ///
-/// TODO (roadmap, chưa phải bug ở v0.3): `apply()` giả định delta luôn đến
-/// đúng thứ tự, không mất gói, và `tick` do caller tự đếm khớp với server.
-/// Khi có packet reorder/loss/retransmit thật, SnapshotDelta trên wire sẽ
-/// cần tự mang theo tick number của nó thay vì để caller đoán.
+/// TODO (roadmap, chưa phải bug ở v0.5): `apply()` vẫn giả định delta luôn
+/// đến đúng thứ tự, không mất gói — packet reorder/loss/retransmit thật vẫn
+/// chưa được xử lý, chỉ riêng việc "tick nào" đã hết phải đoán.
 ///
 /// TODO (roadmap): phía nhận hiện phải tự làm "Packet -> decode -> apply ->
-/// cập nhật baseline" thủ công (xem `tests/replication_applier.rs`). Đối
-/// xứng với `SnapshotSender` ở phía gửi, sau này nên có `SnapshotReceiver`
-/// gói pipeline này lại.
-pub fn apply(old: &Snapshot, delta: &SnapshotDelta, tick: TickId) -> Snapshot {
+/// cập nhật baseline" thủ công (xem `tests/replication_applier.rs`). v0.5
+/// gói pipeline này lại trong `client::SnapshotCache`, đối xứng với
+/// `SnapshotSender` ở phía gửi.
+pub fn apply(old: &Snapshot, delta: &SnapshotDelta) -> Snapshot {
+    let tick = delta.tick;
     let mut items: Vec<SnapshotItem> = Vec::with_capacity(old.items.len());
     let mut oi = 0usize;
     let mut di = 0usize;

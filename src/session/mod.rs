@@ -72,8 +72,9 @@ impl ClientSession {
     /// Đọc hết input đang chờ trong channel (không chặn), cập nhật
     /// `current_input` với gói mới nhất — không FIFO, các gói cũ hơn trong
     /// cùng lần drain bị ghi đè, đúng ngữ nghĩa "trạng thái hiện hành".
-    /// `server_tick` là tick hiện tại của server (không phải tick client tự
-    /// khai trong gói), dùng để cập nhật `last_seen_tick`.
+    /// `server_tick` là tick hiện tại của server — dùng để cập nhật
+    /// `last_seen_tick` VÀ để stamp `InputFrame.tick` (wire không mang
+    /// tick, xem `protocol::WireInput`).
     ///
     /// Trả về `true` nếu phát hiện thread đọc đã kết thúc (connection đóng)
     /// — GameServer dùng tín hiệu này để gọi on_disconnect và loại session.
@@ -81,8 +82,12 @@ impl ClientSession {
         loop {
             match self.incoming.try_recv() {
                 Ok(wire) => {
+                    // InputFrame.tick = tick CỦA SERVER tại lúc nhận —
+                    // đáng tin, khác với việc lấy từ 1 trường tick trên
+                    // wire do client tự khai (WireInput không mang tick,
+                    // xem protocol::WireInput vì sao).
                     self.current_input.update(InputFrame {
-                        tick: TickId(wire.tick),
+                        tick: server_tick,
                         bytes: wire.bytes,
                     });
                     self.last_seen_tick = Some(server_tick);

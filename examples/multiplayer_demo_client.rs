@@ -1,95 +1,75 @@
-//! Client demo cho `multiplayer_demo_server.rs`. Chạy nhiều lần (client1,
-//! client2, ...) ở các terminal khác nhau để có nhiều player cùng lúc.
+//! Client demo cho `multiplayer_demo_server.rs` — v0.5: dùng `GameClient`
+//! SDK, không tự xử lý TCP/Packet/baseline/apply Delta nữa (so với bản v0.4
+//! trước đây, xem lịch sử git). Chạy nhiều lần (client1, client2, ...) ở
+//! các terminal khác nhau để có nhiều player cùng lúc.
 //!
-//! 2 thread: 1 thread nền dùng `ConnectionReader` in liên tục state nhận
-//! được từ server (không chặn việc gõ input); thread chính đọc mỗi dòng từ
-//! stdin làm 1 số nguyên (-128..127), gửi qua `ConnectionWriter` làm input
-//! của tick đó. `Client::connect()` trả sẵn cặp (reader, writer) đã tách —
-//! Cyclone không có API nào trả về 1 connection 2 chiều chưa tách (xem
-//! nguyên tắc "Opinionated API" trong `net::Connection`), nên đây không
-//! phải lựa chọn của caller mà là cách duy nhất `Client::connect()` hoạt
-//! động, đúng cho cả GameServer lẫn client thường như file này.
+//! Đọc stdin trên 1 thread riêng (blocking), đẩy số đã gõ qua channel —
+//! vòng lặp chính không bị chặn bởi việc chờ người dùng gõ phím, vẫn gọi
+//! `client.update()` đều đặn để nhận state mới liên tục.
 //!
 //! Chạy: `cargo run --example multiplayer_demo_client`, gõ số rồi Enter.
 
 use std::io::{self, BufRead, Write};
+use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 
-use cyclone::net::Client;
-use cyclone::protocol::{MessageKind, WireDelta, WireSnapshot};
-use cyclone::replication::{apply, send_input};
-use cyclone::snapshot::{Snapshot, SnapshotDelta};
-use cyclone::TickId;
+use cyclone::snapshot::Snapshot;
+use cyclone::{ConnectionState, GameClient};
 
 const ADDR: &str = "127.0.0.1:7878";
 
 fn main() {
-    let (mut reader, mut writer) =
-        Client::connect(ADDR).expect("connect failed — server đã chạy chưa?");
+    let mut client =
+        GameClient::connect(ADDR).expect("connect failed — server đã chạy chưa?");
 
+    println!("[client] đã kết nối {ADDR}. Gõ 1 số nguyên (vd 1, -1, 5) rồi Enter để di chuyển.");
+
+    let (tx, rx) = mpsc::channel::<i8>();
     thread::spawn(move || {
-        // Baseline tái tạo phía client: full Snapshot đầu tiên, sau đó mỗi
-        // Delta được replication::apply() lên baseline này — chứng minh
-        // pipeline decode + apply hoạt động đúng, không chỉ đếm byte nhận
-        // được.
-        let mut baseline: Option<Snapshot> = None;
-
-        loop {
-            match reader.recv() {
-                Ok(packet) => match packet.kind {
-                    MessageKind::Snapshot => match WireSnapshot::from_bytes(&packet.payload) {
-                        Ok(wire) => {
-                            let snapshot = Snapshot::from(&wire);
-                            print_snapshot(&snapshot);
-                            baseline = Some(snapshot);
-                        }
-                        Err(err) => println!("[client] snapshot decode error: {err}"),
-                    },
-                    MessageKind::Delta => match WireDelta::from_bytes(&packet.payload) {
-                        Ok(wire) => {
-                            let delta = SnapshotDelta::from(&wire);
-                            let Some(old) = &baseline else {
-                                println!("[client] nhận delta trước khi có baseline, bỏ qua");
-                                continue;
-                            };
-                            // wire.tick không có trong WireDelta (chỉ Snapshot
-                            // mới mang tick) — dùng tick gần nhất đã biết + 1
-                            // chỉ để hiển thị, không ảnh hưởng nội dung state.
-                            let next_tick = TickId(old.tick.0 + 1);
-                            let snapshot = apply(old, &delta, next_tick);
-                            print_snapshot(&snapshot);
-                            baseline = Some(snapshot);
-                        }
-                        Err(err) => println!("[client] delta decode error: {err}"),
-                    },
-                    // Server không bao giờ gửi Input — chiều đó chỉ client -> server.
-                    MessageKind::Input => {}
-                },
-                Err(_) => {
-                    println!("[client] mất kết nối, thread đọc dừng");
-                    break;
+        let stdin = io::stdin();
+        for line in stdin.lock().lines() {
+            let Ok(line) = line else { break };
+            match line.trim().parse::<i8>() {
+                Ok(delta) => {
+                    if tx.send(delta).is_err() {
+                        break;
+                    }
                 }
+                Err(_) => println!("[client] nhập 1 số nguyên từ -128 tới 127"),
             }
         }
     });
 
-    println!("[client] đã kết nối {ADDR}. Gõ 1 số nguyên (vd 1, -1, 5) rồi Enter để di chuyển.");
-    let stdin = io::stdin();
-    let mut tick: u64 = 0;
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
-        let delta: i8 = match line.trim().parse() {
-            Ok(v) => v,
-            Err(_) => {
-                println!("[client] nhập 1 số nguyên từ -128 tới 127");
-                continue;
+    let mut last_printed_tick: Option<u64> = None;
+    loop {
+        loop {
+            match rx.try_recv() {
+                Ok(delta) => client.push_input(vec![delta as u8]),
+                Err(mpsc::TryRecvError::Empty) => break,
+                // stdin đóng (Ctrl+D hoặc EOF) -> không còn input mới nào
+                // nữa, thoát demo — khác với thực tế production nơi
+                // GameClient nên tiếp tục chạy dù không còn input tới.
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    println!("[client] stdin đóng, thoát");
+                    return;
+                }
             }
-        };
-        if send_input(&mut writer, TickId(tick), vec![delta as u8]).is_err() {
-            println!("[client] gửi input thất bại — server có thể đã đóng");
+        }
+
+        if client.update() == ConnectionState::Disconnected {
+            println!("[client] mất kết nối");
             break;
         }
-        tick += 1;
+
+        if let Some(snapshot) = client.snapshot()
+            && last_printed_tick != Some(snapshot.tick.0)
+        {
+            print_snapshot(snapshot);
+            last_printed_tick = Some(snapshot.tick.0);
+        }
+
+        thread::sleep(Duration::from_millis(16));
     }
 }
 
